@@ -62,20 +62,16 @@ async def generate_edge_voice(text, voice_id, speed, output_path):
     communicate = edge_tts.Communicate(text, voice_id, rate=speed_str)
     await communicate.save(output_path)
 
-# ഓഡിയോ പ്രോസസ്സ് ചെയ്യാനുള്ള പുതിയ എറർ-ഫ്രീ ഫങ്ക്ഷൻ (Scipy & Numpy)
+# ഓഡിയോ പ്രോസസ്സിംഗ് ഫങ്ക്ഷൻ (Scipy & Numpy)
 def process_audio_scipy(input_path, output_path, bass, treble, volume, delay, compress, pitch):
-    # എഡ്ജ് ടിടിഎസ് വോയിസ് റീഡ് ചെയ്യുന്നു
     import subprocess
     wav_path = "temp_raw.wav"
     
-    # MP3 ഫയലിനെ WAV ആക്കുന്നു
     if os.path.exists(wav_path):
         os.remove(wav_path)
     subprocess.run(['ffmpeg', '-i', input_path, wav_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     
     sample_rate, data = wavfile.read(wav_path)
-    
-    # ഫ്ലോട്ട് ഫോർമാറ്റിലേക്ക് മാറ്റുന്നു
     data = data.astype(np.float32)
     
     # 1. വോളിയം ആംപ്ലിഫയർ
@@ -87,7 +83,7 @@ def process_audio_scipy(input_path, output_path, bass, treble, volume, delay, co
         if max_val > 32767:
             data = (data / max_val) * 32700
             
-    # 3. ബേസ് ബൂസ്റ്റർ (Moving Average Box Filter)
+    # 3. ബേസ് ബൂസ്റ്റർ
     if bass > 1.0:
         kernel_size = 5
         bass_layer = np.convolve(data, np.ones(kernel_size)/kernel_size, mode='same')
@@ -101,13 +97,10 @@ def process_audio_scipy(input_path, output_path, bass, treble, volume, delay, co
             echo_data[delay_samples:] = data[:-delay_samples] * 0.4
             data = data + echo_data
 
-    # 5. പിച്ച് കൺട്രോൾ (Sample Rate മാറ്റം വഴി)
+    # 5. പിച്ച് കൺട്രോൾ
     final_rate = int(sample_rate * pitch)
     
-    # വീണ്ടും ഇൻ്റജർ ഫോർമാറ്റിലേക്ക് മാറ്റുന്നു
     data = np.clip(data, -32768, 32767).astype(np.int16)
-    
-    # ഫൈനൽ WAV സേവ് ചെയ്യുന്നു
     wavfile.write(output_path, final_rate, data)
 
 raw_audio_path = "raw_generated.mp3"
@@ -139,7 +132,6 @@ if st.button("🎙️ Generate AI Voice", use_container_width=True):
                     asyncio.set_event_loop(loop)
                     loop.run_until_complete(generate_edge_voice(user_text, selected_edge_id, speed_selection, raw_audio_path))
                 
-                # പുതിയ എറർ ഫ്രീ പ്രോസസ്സിംഗ്
                 process_audio_scipy(raw_audio_path, final_wav_path, bass_boost, treble_boost, volume_boost, reverb_delay, enable_compression, pitch_selection)
                 
                 st.success("🎉 Voice Generated Successfully with Studio Effects!")
@@ -153,6 +145,6 @@ if st.button("🎙️ Generate AI Voice", use_container_width=True):
     else:
         st.warning("Please enter some text first.")
 
-# --- FOOTER ---
+# --- FOOTER (പുതിയ പതിപ്പിൽ എറർ വരാത്ത രീതിയിൽ മാറ്റിയത്) ---
 st.write("---")
-st.markdown("<h4 style='text-align: center; color: #888888;'>Created by Ashraf M J</h4>", unsafe_html=True)
+st.html("<h4 style='text-align: center; color: #888888;'>Created by Ashraf M J</h4>")
