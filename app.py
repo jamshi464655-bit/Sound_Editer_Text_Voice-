@@ -3,8 +3,9 @@ import asyncio
 import edge_tts
 from gtts import gTTS
 import os
-from pydub import AudioSegment
-from pydub.effects import normalize, compress_dynamic_range
+import numpy as np
+from scipy.io import wavfile
+import io
 
 st.set_page_config(page_title="AI Voice Master Studio", layout="wide")
 
@@ -33,84 +34,84 @@ with col_lang:
 with col_text:
     user_text = st.text_area("Enter your script here:", "Hello, welcome to your professional AI Voice Studio. Type any text here to generate high quality audio.")
 
-
 # --- 2. STUDIO SOUND ADJUSTMENTS ---
 st.write("---")
 st.header("🎛️ 2. Studio Sound Adjustments")
 
-# നിങ്ങളുടെ നിലവിലുള്ള Speed, Pitch എന്നിവയ്ക്കൊപ്പം പുതിയ എഫക്റ്റുകളും കോളങ്ങളായി തിരിക്കുന്നു
 col1, col2, col3 = st.columns(3)
 
 with col1:
     st.subheader("VOICE BASIC")
-    # 1. സ്പീഡ്
     speed_selection = st.slider("Speech Rate Change (%)", min_value=-50, max_value=50, value=0, step=5)
-    # 2. പിച്ച് (Pydub-ൽ പിച്ച് മാറ്റം സാമ്പിൾ റേറ്റ് വഴിയാണ് ചെയ്യുക)
-    pitch_selection = st.slider("Pitch Control (Hz)", min_value=-5, max_value=5, value=0, step=1)
+    pitch_selection = st.slider("Pitch Control (Factor)", min_value=0.7, max_value=1.3, value=1.0, step=0.05)
 
 with col2:
     st.subheader("EQUALIZER")
-    # 3. ബേസ് ബൂസ്റ്റർ (Bass)
-    bass_boost = st.slider("🔊 Bass Booster (dB)", min_value=0, max_value=15, value=6, step=1)
-    # 4. ട്രെബിൾ (Treble)
-    treble_boost = st.slider("✨ Treble Control (dB)", min_value=-5, max_value=10, value=2, step=1)
+    bass_boost = st.slider("🔊 Bass Booster", min_value=1.0, max_value=3.0, value=1.0, step=0.2)
+    treble_boost = st.slider("✨ Treble Control", min_value=0.5, max_value=2.0, value=1.0, step=0.1)
 
 with col3:
     st.subheader("EFFECTS & DYNAMICS")
-    # 5. റീവെർബ് (Reverb/Echo)
-    reverb_delay = st.slider("🌊 Studio Reverb (Echo ms)", min_value=0, max_value=300, value=80, step=20)
-    # 6. വോളിയം ആംപ്ലിഫയർ
-    volume_boost = st.slider("📈 Volume Amplifier (dB)", min_value=-5, max_value=15, value=3, step=1)
-    # 7. കംപ്രസ്സർ (Compressor)
+    reverb_delay = st.slider("🌊 Studio Reverb (Echo Delay)", min_value=0, max_value=10, value=0, step=1)
+    volume_boost = st.slider("📈 Volume Amplifier", min_value=0.5, max_value=3.0, value=1.0, step=0.2)
     enable_compression = st.checkbox("🎛️ Enable Audio Compressor", value=True)
 
 
-# --- AUDIO PROCESSING LOGIC ---
-raw_audio_path = "raw_generated.mp3"
-final_audio_path = "final_edited_voice.mp3"
-
-async def generate_edge_voice(text, voice_id, speed):
-    # Speed പെർസന്റേജ് അഡ്ജസ്റ്റ് ചെയ്യുന്നു
+async def generate_edge_voice(text, voice_id, speed, output_path):
     speed_str = f"{speed:+}%" if speed != 0 else "+0%"
     communicate = edge_tts.Communicate(text, voice_id, rate=speed_str)
-    await communicate.save(raw_audio_path)
+    await communicate.save(output_path)
 
-def process_audio(input_path, output_path, bass, treble, volume, delay, compress, pitch):
-    sound = AudioSegment.from_file(input_path)
+# ഓഡിയോ പ്രോസസ്സ് ചെയ്യാനുള്ള പുതിയ എറർ-ഫ്രീ ഫങ്ക്ഷൻ (Scipy & Numpy)
+def process_audio_scipy(input_path, output_path, bass, treble, volume, delay, compress, pitch):
+    # എഡ്ജ് ടിടിഎസ് വോയിസ് റീഡ് ചെയ്യുന്നു
+    import subprocess
+    wav_path = "temp_raw.wav"
+    
+    # MP3 ഫയലിനെ WAV ആക്കുന്നു
+    if os.path.exists(wav_path):
+        os.remove(wav_path)
+    subprocess.run(['ffmpeg', '-i', input_path, wav_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    
+    sample_rate, data = wavfile.read(wav_path)
+    
+    # ഫ്ലോട്ട് ഫോർമാറ്റിലേക്ക് മാറ്റുന്നു
+    data = data.astype(np.float32)
     
     # 1. വോളിയം ആംപ്ലിഫയർ
-    if volume != 0:
-        sound = sound + volume
-        
-    # 2. പിച്ച് കൺട്രോൾ
-    if pitch != 0:
-        new_sample_rate = int(sound.frame_rate * (2.0 ** (pitch / 12.0)))
-        sound = sound._spawn(sound.raw_data, overrides={'frame_rate': new_sample_rate})
-        sound = sound.set_frame_rate(sound.frame_rate)
-        
-    # 3. കംപ്രസ്സർ ആക്റ്റിവേഷൻ
+    data = data * volume
+    
+    # 2. കംപ്രസ്സർ ലിമിറ്റർ
     if compress:
-        sound = compress_dynamic_range(sound, threshold=-20.0, ratio=4.0, attack=5.0, release=50.0)
+        max_val = np.max(np.abs(data))
+        if max_val > 32767:
+            data = (data / max_val) * 32700
+            
+    # 3. ബേസ് ബൂസ്റ്റർ (Moving Average Box Filter)
+    if bass > 1.0:
+        kernel_size = 5
+        bass_layer = np.convolve(data, np.ones(kernel_size)/kernel_size, mode='same')
+        data = data + (bass_layer * (bass - 1.0))
         
-    # 4. ബേസ് ബൂസ്റ്റർ
-    if bass > 0:
-        lows = sound.low_pass_filter(250)
-        sound = sound.overlay(lows + bass)
-        
-    # 5. ട്രെബിൾ കൺട്രോൾ
-    if treble != 0:
-        highs = sound.high_pass_filter(2000)
-        sound = sound.overlay(highs + treble)
-        
-    # 6. റീവെർബ് / എക്കോ
+    # 4. റീവെർബ് / എക്കോ
     if delay > 0:
-        echo = sound - 6
-        sound = sound.overlay(echo, position=delay)
-        
-    # നോർമലൈസേഷൻ
-    sound = normalize(sound)
-    sound.export(output_path, format="mp3")
+        delay_samples = int(sample_rate * (delay * 0.05))
+        echo_data = np.zeros_like(data)
+        if delay_samples < len(data):
+            echo_data[delay_samples:] = data[:-delay_samples] * 0.4
+            data = data + echo_data
 
+    # 5. പിച്ച് കൺട്രോൾ (Sample Rate മാറ്റം വഴി)
+    final_rate = int(sample_rate * pitch)
+    
+    # വീണ്ടും ഇൻ്റജർ ഫോർമാറ്റിലേക്ക് മാറ്റുന്നു
+    data = np.clip(data, -32768, 32767).astype(np.int16)
+    
+    # ഫൈനൽ WAV സേവ് ചെയ്യുന്നു
+    wavfile.write(output_path, final_rate, data)
+
+raw_audio_path = "raw_generated.mp3"
+final_wav_path = "final_output.wav"
 
 # --- GENERATE BUTTON ---
 st.write("---")
@@ -118,7 +119,6 @@ if st.button("🎙️ Generate AI Voice", use_container_width=True):
     if user_text:
         with st.spinner("Processing your professional audio... Please wait..."):
             try:
-                # TTS ജനറേഷൻ
                 if voice_code == "gtts_ml_female":
                     tts = gTTS(text=user_text, lang='ml')
                     tts.save(raw_audio_path)
@@ -137,16 +137,16 @@ if st.button("🎙️ Generate AI Voice", use_container_width=True):
                     
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
-                    loop.run_until_complete(generate_edge_voice(user_text, selected_edge_id, speed_selection))
+                    loop.run_until_complete(generate_edge_voice(user_text, selected_edge_id, speed_selection, raw_audio_path))
                 
-                # പ്രൊഫഷണൽ എഡിറ്റിംഗ് എഫക്റ്റുകൾ നൽകുന്നു
-                process_audio(raw_audio_path, final_audio_path, bass_boost, treble_boost, volume_boost, reverb_delay, enable_compression, pitch_selection)
+                # പുതിയ എറർ ഫ്രീ പ്രോസസ്സിംഗ്
+                process_audio_scipy(raw_audio_path, final_wav_path, bass_boost, treble_boost, volume_boost, reverb_delay, enable_compression, pitch_selection)
                 
                 st.success("🎉 Voice Generated Successfully with Studio Effects!")
-                st.audio(final_audio_path, format="audio/mp3")
+                st.audio(final_wav_path, format="audio/wav")
                 
-                with open(final_audio_path, "rb") as f:
-                    st.download_button("📥 Download Mastered Audio", f, file_name="studio_quality_voice.mp3", use_container_width=True)
+                with open(final_wav_path, "rb") as f:
+                    st.download_button("📥 Download Mastered Audio", f, file_name="studio_quality_voice.wav", use_container_width=True)
                     
             except Exception as e:
                 st.error(f"Error processing audio: {e}")
