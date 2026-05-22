@@ -1,21 +1,8 @@
-# 🛠️ Python 3.11+ / Streamlit Cloud ഓഡിയോ എറർ പരിഹരിക്കാനുള്ള പാച്ച്
-try:
-    import audioop
-except ImportError:
-    import sys
-    try:
-        import pyaudioop
-        sys.modules['audioop'] = pyaudioop
-    except ImportError:
-        pass
-
 import streamlit as st
 import asyncio
 import edge_tts
 from gtts import gTTS
 import os
-from pydub import AudioSegment
-from pydub.effects import normalize, compress_dynamic_range
 
 # Page Configuration
 st.set_page_config(
@@ -100,7 +87,7 @@ st.html("""
 st.html("""
     <div class="header-box">
         <div class="header-title">🎙️ AI Voice Master Studio</div>
-        <div class="header-subtitle">Generate professional voices in Malayalam, Arabic, English & Hindi with studio effects</div>
+        <div class="header-subtitle">Generate professional voices in Malayalam, Arabic, English & Hindi with studio controls</div>
     </div>
 """)
 
@@ -128,83 +115,50 @@ with st.container():
     with col_v2:
         user_text = st.text_area("Enter your script here:", "Hello, welcome to your professional AI Voice Studio. Type any text here to generate high quality audio.", height=100)
 
-# --- SECTION 2: AUDIO MIXING BOARD ---
+# --- SECTION 2: AUDIO STUDIO BOARD ---
 st.write("")
-st.markdown("### 🎛️ 2. Studio Mixing Board")
+st.markdown("### 🎛️ 2. Studio Sound Adjustments")
 
 with st.container():
     c_col1, c_col2 = st.columns(2)
     
     with c_col1:
         with st.container(border=False):
-            st.html('<div class="card-title">Depth & Loudness</div>')
-            st.html('<div class="card-icon">🔊</div>')
-            bass_boost = st.slider("Bass Boost (dB)", min_value=0, max_value=15, value=6, step=1)
-            st.write("")
-            volume_boost = st.slider("Volume Gain (dB)", min_value=-5, max_value=15, value=3, step=1)
+            st.html('<div class="card-title">Voice Speed</div>')
+            st.html('<div class="card-icon">⚡</div>')
+            voice_speed = st.slider("Speech Rate Change (%)", min_value=-50, max_value=50, value=0, step=5, help="Increase for faster speech, decrease for slower.")
 
     with c_col2:
         with st.container(border=False):
-            st.html('<div class="card-title">Clarity & Echo</div>')
-            st.html('<div class="card-icon">✨</div>')
-            treble_boost = st.slider("Treble Boost (dB)", min_value=-5, max_value=10, value=2, step=1)
-            st.write("")
-            reverb_delay = st.slider("Studio Reverb (ms)", min_value=0, max_value=300, value=80, step=20)
+            st.html('<div class="card-title">Voice Pitch</div>')
+            st.html('<div class="card-icon">🎼</div>')
+            voice_pitch = st.slider("Pitch Control (Hz)", min_value=-50, max_value=50, value=0, step=5, help="Higher values make voice thinner, lower values make it deeper.")
 
-    st.write("---")
-    enable_compression = st.toggle("Enable Audio Compression (Dynamic Range Balance)", value=True)
-
-
-# --- AUDIO PRODUCER ENGINE ---
-def process_audio(input_path, output_path, bass, treble, volume, delay, compress):
-    sound = AudioSegment.from_file(input_path)
+# --- AUDIO GENERATION FUNCTION ---
+async def generate_edge_voice(text, voice_id, speed, pitch, output_path):
+    # Formulating edge-tts parameters
+    speed_str = f"{'+' if speed >= 0 else ''}{speed}%"
+    pitch_str = f"{'+' if pitch >= 0 else ''}{pitch}Hz"
     
-    if volume != 0:
-        sound = sound + volume
-        
-    if compress:
-        sound = compress_dynamic_range(
-            sound, 
-            threshold=-16.0,
-            ratio=3.5,
-            attack=10.0,
-            release=100.0
-        )
-        
-    if bass > 0:
-        bass_filter = sound.low_pass_filter(200)
-        sound = sound.overlay(bass_filter + (bass - 2))
-        
-    if treble != 0:
-        treble_filter = sound.high_pass_filter(3000)
-        sound = sound.overlay(treble_filter + treble)
-        
-    if delay > 0:
-        decay1 = sound - 9
-        decay2 = sound - 16
-        sound = sound.overlay(decay1, position=delay)
-        sound = sound.overlay(decay2, position=delay * 2)
-        
-    sound = normalize(sound, headroom=0.5)
-    sound.export(output_path, format="mp3", bitrate="192k")
-
-async def generate_edge_voice(text, voice_id, output_path):
-    communicate = edge_tts.Communicate(text, voice_id)
+    communicate = edge_tts.Communicate(text, voice_id, rate=speed_str, pitch=pitch_str)
     await communicate.save(output_path)
 
-raw_audio_path = "raw_generated.mp3"
-final_audio_path = "final_edited_voice.mp3"
+final_audio_path = "studio_voice.mp3"
 
 # --- ACTION BUTTON & PROCESSING ---
 st.write("")
-if st.button("🎙️ Generate & Mix Audio", use_container_width=True):
+if st.button("🎙️ Generate AI Voice", use_container_width=True):
     if user_text:
-        with st.spinner("Generating AI Voice & applying studio master effects..."):
+        with st.spinner("Generating high quality AI Voice..."):
             try:
-                # 1. Voice Generation Stage
+                # Cleanup existing file if any
+                if os.path.exists(final_audio_path):
+                    os.remove(final_audio_path)
+                    
+                # Voice Generation Stage
                 if voice_code == "gtts_ml_female":
                     tts = gTTS(text=user_text, lang='ml')
-                    tts.save(raw_audio_path)
+                    tts.save(final_audio_path)
                 else:
                     edge_voice_mapping = {
                         "edge_ml_midhun": "ml-IN-MidhunNeural",
@@ -220,21 +174,14 @@ if st.button("🎙️ Generate & Mix Audio", use_container_width=True):
                     
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
-                    loop.run_until_complete(generate_edge_voice(user_text, selected_edge_id, raw_audio_path))
+                    loop.run_until_complete(generate_edge_voice(user_text, selected_edge_id, voice_speed, voice_pitch, final_audio_path))
                 
-                # 2. Audio Mastering Stage
-                try:
-                    process_audio(raw_audio_path, final_audio_path, bass_boost, treble_boost, volume_boost, reverb_delay, enable_compression)
-                    audio_to_play = final_edited_voice = final_audio_path
-                    st.success("🎉 Voice mastering completed successfully!")
-                except Exception as e:
-                    audio_to_play = raw_audio_path
-                    st.warning("💡 Audio generated in raw format. To apply mixing effects (Bass/Reverb), make sure packages.txt with ffmpeg is configured.")
+                # Success Display
+                st.success("🎉 Voice generated successfully!")
+                st.audio(final_audio_path, format="audio/mp3")
                 
-                st.audio(audio_to_play, format="audio/mp3")
-                
-                with open(audio_to_play, "rb") as f:
-                    st.download_button("📥 Download Mastered Audio", f, file_name="ai_studio_voice.mp3", use_container_width=True)
+                with open(final_audio_path, "rb") as f:
+                    st.download_button("📥 Download Audio File", f, file_name="ai_studio_voice.mp3", use_container_width=True)
                     
             except Exception as e:
                 st.error(f"An error occurred during generation: {e}")
