@@ -52,7 +52,8 @@ with col2:
 
 with col3:
     st.subheader("EFFECTS & DYNAMICS")
-    reverb_delay = st.slider("🌊 Studio Reverb (Echo Delay)", min_value=0, max_value=10, value=0, step=1)
+    # എക്കോ ഒഴിവാക്കി പ്യുവർ സ്റ്റുഡിയോ റീവെർബ് മാത്രം നൽകിയിരിക്കുന്നു
+    reverb_intensity = st.slider("🌊 Studio Reverb (Mix Intensity)", min_value=0.0, max_value=1.0, value=0.0, step=0.1)
     volume_boost = st.slider("📈 Volume Amplifier", min_value=0.5, max_value=3.0, value=1.0, step=0.2)
     enable_compression = st.checkbox("🎛️ Enable Audio Compressor", value=True)
 
@@ -63,7 +64,7 @@ async def generate_edge_voice(text, voice_id, speed, output_path):
     await communicate.save(output_path)
 
 # ഓഡിയോ പ്രോസസ്സിംഗ് ഫങ്ക്ഷൻ (Scipy & Numpy)
-def process_audio_scipy(input_path, output_path, bass, treble, volume, delay, compress, pitch):
+def process_audio_scipy(input_path, output_path, bass, treble, volume, reverb_mix, compress, pitch):
     import subprocess
     wav_path = "temp_raw.wav"
     
@@ -89,13 +90,19 @@ def process_audio_scipy(input_path, output_path, bass, treble, volume, delay, co
         bass_layer = np.convolve(data, np.ones(kernel_size)/kernel_size, mode='same')
         data = data + (bass_layer * (bass - 1.0))
         
-    # 4. റീവെർബ് / എക്കോ
-    if delay > 0:
-        delay_samples = int(sample_rate * (delay * 0.05))
-        echo_data = np.zeros_like(data)
-        if delay_samples < len(data):
-            echo_data[delay_samples:] = data[:-delay_samples] * 0.4
-            data = data + echo_data
+    # 4. പ്രൊഫഷണൽ സ്റ്റുഡിയോ റീവെർബ് (സ്വാഭാവികമായ ഹാൾ/റൂം എഫക്റ്റ്)
+    if reverb_mix > 0.0:
+        # വ്യത്യസ്ത ഡിലേ ടൈമുകൾ നൽകി മൾട്ടിപ്പിൾ റിഫ്ലെക്ഷൻസ് ഉണ്ടാക്കുന്നു
+        reverb_data = np.zeros_like(data)
+        delays = [int(sample_rate * 0.02), int(sample_rate * 0.04), int(sample_rate * 0.07)]
+        decays = [0.4, 0.25, 0.15]
+        
+        for d, dec in zip(delays, decays):
+            if d < len(data):
+                reverb_data[d:] += data[:-d] * dec
+                
+        # യൂസർ സെറ്റ് ചെയ്ത ഇൻ്റൻസിറ്റി അനുസരിച്ച് മെയിൻ വോയിസിലേക്ക് റീവെർബ് മിക്സ് ചെയ്യുന്നു
+        data = data + (reverb_data * reverb_mix)
 
     # 5. പിച്ച് കൺട്രോൾ
     final_rate = int(sample_rate * pitch)
@@ -132,7 +139,8 @@ if st.button("🎙️ Generate AI Voice", use_container_width=True):
                     asyncio.set_event_loop(loop)
                     loop.run_until_complete(generate_edge_voice(user_text, selected_edge_id, speed_selection, raw_audio_path))
                 
-                process_audio_scipy(raw_audio_path, final_wav_path, bass_boost, treble_boost, volume_boost, reverb_delay, enable_compression, pitch_selection)
+                # അപ്ഡേറ്റ് ചെയ്ത പ്രോസസ്സിംഗ് റൺ ചെയ്യുന്നു
+                process_audio_scipy(raw_audio_path, final_wav_path, bass_boost, treble_boost, volume_boost, reverb_intensity, enable_compression, pitch_selection)
                 
                 st.success("🎉 Voice Generated Successfully with Studio Effects!")
                 st.audio(final_wav_path, format="audio/wav")
@@ -145,6 +153,6 @@ if st.button("🎙️ Generate AI Voice", use_container_width=True):
     else:
         st.warning("Please enter some text first.")
 
-# --- FOOTER (പുതിയ പതിപ്പിൽ എറർ വരാത്ത രീതിയിൽ മാറ്റിയത്) ---
+# --- FOOTER ---
 st.write("---")
 st.html("<h4 style='text-align: center; color: #888888;'>Created by Ashraf M J</h4>")
