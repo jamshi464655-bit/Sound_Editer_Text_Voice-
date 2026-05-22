@@ -1,3 +1,14 @@
+# 🛠️ Python 3.11+ / Streamlit Cloud ഓഡിയോ എറർ പരിഹരിക്കാനുള്ള പാച്ച്
+try:
+    import audioop
+except ImportError:
+    import sys
+    try:
+        import pyaudioop
+        sys.modules['audioop'] = pyaudioop
+    except ImportError:
+        pass
+
 import streamlit as st
 import asyncio
 import edge_tts
@@ -144,45 +155,38 @@ with st.container():
     enable_compression = st.toggle("Enable Audio Compression (Dynamic Range Balance)", value=True)
 
 
-# --- 🔥 NEW ADVANCED AUDIO PRODUCER ENGINE 🔥 ---
+# --- AUDIO PRODUCER ENGINE ---
 def process_audio(input_path, output_path, bass, treble, volume, delay, compress):
     sound = AudioSegment.from_file(input_path)
     
-    # 1. Volume Pre-Gain
     if volume != 0:
         sound = sound + volume
         
-    # 2. Studio Quality Compression (Prevents peaking and flattening)
     if compress:
         sound = compress_dynamic_range(
             sound, 
-            threshold=-16.0,  # Pro Studio standard threshold
-            ratio=3.5,        # Smooth compression ratio
-            attack=10.0,      # Smooth attack time
-            release=100.0     # Smooth decay release
+            threshold=-16.0,
+            ratio=3.5,
+            attack=10.0,
+            release=100.0
         )
         
-    # 3. Enhanced Bass Engine (Parametric shelving model)
     if bass > 0:
-        bass_filter = sound.low_pass_filter(200) # Deep frequency focus
+        bass_filter = sound.low_pass_filter(200)
         sound = sound.overlay(bass_filter + (bass - 2))
         
-    # 4. Enhanced Treble Engine (Crisp Presence filter)
     if treble != 0:
-        treble_filter = sound.high_pass_filter(3000) # Sharpness focus
+        treble_filter = sound.high_pass_filter(3000)
         sound = sound.overlay(treble_filter + treble)
         
-    # 5. True Reverb / Room Space Modeling
     if delay > 0:
-        # Creating a decaying tail for true studio acoustics
         decay1 = sound - 9
         decay2 = sound - 16
         sound = sound.overlay(decay1, position=delay)
         sound = sound.overlay(decay2, position=delay * 2)
         
-    # 6. Peak Normalization (Safe loudness without distortion)
     sound = normalize(sound, headroom=0.5)
-    sound.export(output_path, format="mp3", bitrate="192k") # Pro 192kbps output
+    sound.export(output_path, format="mp3", bitrate="192k")
 
 async def generate_edge_voice(text, voice_id, output_path):
     communicate = edge_tts.Communicate(text, voice_id)
@@ -221,11 +225,11 @@ if st.button("🎙️ Generate & Mix Audio", use_container_width=True):
                 # 2. Audio Mastering Stage
                 try:
                     process_audio(raw_audio_path, final_audio_path, bass_boost, treble_boost, volume_boost, reverb_delay, enable_compression)
-                    audio_to_play = final_audio_path
+                    audio_to_play = final_edited_voice = final_audio_path
                     st.success("🎉 Voice mastering completed successfully!")
                 except Exception as e:
                     audio_to_play = raw_audio_path
-                    st.warning("💡 Audio generated in raw format. To apply mixing effects (Bass/Reverb), make sure FFmpeg is configured in your project folder.")
+                    st.warning("💡 Audio generated in raw format. To apply mixing effects (Bass/Reverb), make sure packages.txt with ffmpeg is configured.")
                 
                 st.audio(audio_to_play, format="audio/mp3")
                 
